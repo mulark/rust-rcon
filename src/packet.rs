@@ -8,7 +8,8 @@
 // according to those terms.
 
 use std::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::io::Read;
+use std::io::Write;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PacketType {
@@ -63,38 +64,41 @@ impl Packet {
         self.id < 0
     }
 
-    pub async fn serialize<T: Unpin + AsyncWrite>(&self, w: &mut T) -> io::Result<()> {
+    pub fn serialize<T: Unpin + Write>(&self, w: &mut T) -> io::Result<()> {
         // Write bytes to a buffer first so only one tcp packet is sent
         // This is done in order to not overwhelm a Minecraft server
         let mut buf = Vec::with_capacity(self.length as usize);
 
-        buf.write_i32_le(self.length).await?;
-        buf.write_i32_le(self.id).await?;
-        buf.write_i32_le(self.ptype.to_i32()).await?;
-        buf.write_all(self.body.as_bytes()).await?;
-        buf.write_all(b"\x00\x00").await?;
+        buf.write_all(&i32::to_le_bytes(self.length))?;
+        buf.write_all(&i32::to_le_bytes(self.id))?;
+        buf.write_all(&i32::to_le_bytes(self.ptype.to_i32()))?;
+        buf.write_all(self.body.as_bytes())?;
+        buf.write_all(b"\x00\x00")?;
 
-        w.write_all(&buf).await?;
+        w.write_all(&buf)?;
 
         Ok(())
     }
 
-    pub async fn deserialize<T: Unpin + AsyncRead>(r: &mut T) -> io::Result<Packet> {
-        let length = r.read_i32_le().await?;
-        let id = r.read_i32_le().await?;
-        let ptype = r.read_i32_le().await?;
+    pub fn deserialize<T: Unpin + Read>(r: &mut T) -> io::Result<Packet> {
+        let mut buf = [0u8; 4];
+        r.read_exact(&mut buf)?;
+        let length = i32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        let id = i32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        let ptype = i32::from_le_bytes(buf);
         let body_length = length - 10;
         let mut body_buffer = Vec::with_capacity(body_length as usize);
 
         r.take(body_length as u64)
-            .read_to_end(&mut body_buffer)
-            .await?;
+            .read_to_end(&mut body_buffer)?;
 
         let body = String::from_utf8(body_buffer)
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
 
         // terminating nulls
-        r.read_u16().await?;
+        r.read_exact(&mut [0u8; 2])?;
 
         let packet = Packet {
             length,

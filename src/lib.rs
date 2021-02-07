@@ -11,7 +11,8 @@ use err_derive::Error;
 use packet::{Packet, PacketType};
 use std::io;
 use std::time::Duration;
-use tokio::net::{TcpStream, ToSocketAddrs};
+use std::net::{TcpStream, ToSocketAddrs};
+//use tokio::net::{TcpStream, ToSocketAddrs};
 
 mod packet;
 
@@ -51,48 +52,48 @@ impl Connection {
     pub async fn connect<T: ToSocketAddrs>(address: T, password: &str) -> Result<Connection> {
         Self::builder()
             .enable_minecraft_quirks(true)
-            .connect(address, password).await
+            .connect(address, password)
     }
 
-    pub async fn cmd(&mut self, cmd: &str) -> Result<String> {
+    pub fn cmd(&mut self, cmd: &str) -> Result<String> {
         if self.minecraft_quirks_enabled && cmd.len() > MINECRAFT_MAX_PAYLOAD_SIZE {
             return Err(Error::CommandTooLong);
         }
 
-        self.send(PacketType::ExecCommand, cmd).await?;
+        self.send(PacketType::ExecCommand, cmd)?;
 
         if self.minecraft_quirks_enabled {
-            tokio::time::sleep(Duration::from_millis(DELAY_TIME_MILLIS)).await;
+            std::thread::sleep(Duration::from_millis(DELAY_TIME_MILLIS));
         }
 
-        let response = self.receive_response().await?;
+        let response = self.receive_response()?;
 
         Ok(response)
     }
 
-    async fn receive_response(&mut self) -> Result<String> {
+    fn receive_response(&mut self) -> Result<String> {
         if self.factorio_quirks_enabled {
-            self.receive_single_packet_response().await
+            self.receive_single_packet_response()
         } else {
-            self.receive_multi_packet_response().await
+            self.receive_multi_packet_response()
         }
     }
 
-    async fn receive_single_packet_response(&mut self) -> Result<String> {
-        let received_packet = self.receive_packet().await?;
+    fn receive_single_packet_response(&mut self) -> Result<String> {
+        let received_packet = self.receive_packet()?;
 
         Ok(received_packet.get_body().into())
     }
 
-    async fn receive_multi_packet_response(&mut self) -> Result<String> {
+    fn receive_multi_packet_response(&mut self) -> Result<String> {
         // the server processes packets in order, so send an empty packet and
         // remember its id to detect the end of a multi-packet response
-        let end_id = self.send(PacketType::ExecCommand, "").await?;
+        let end_id = self.send(PacketType::ExecCommand, "")?;
 
         let mut result = String::new();
 
         loop {
-            let received_packet = self.receive_packet().await?;
+            let received_packet = self.receive_packet()?;
 
             if received_packet.get_id() == end_id {
                 // This is the response to the end-marker packet
@@ -103,10 +104,10 @@ impl Connection {
         }
     }
 
-    async fn auth(&mut self, password: &str) -> Result<()> {
-        self.send(PacketType::Auth, password).await?;
+    fn auth(&mut self, password: &str) -> Result<()> {
+        self.send(PacketType::Auth, password)?;
         let received_packet = loop {
-            let received_packet = self.receive_packet().await?;
+            let received_packet = self.receive_packet()?;
             if received_packet.get_type() == PacketType::AuthResponse {
                 break received_packet;
             }
@@ -119,18 +120,18 @@ impl Connection {
         }
     }
 
-    async fn send(&mut self, ptype: PacketType, body: &str) -> io::Result<i32> {
+    fn send(&mut self, ptype: PacketType, body: &str) -> io::Result<i32> {
         let id = self.generate_packet_id();
 
         let packet = Packet::new(id, ptype, body.into());
 
-        packet.serialize(&mut self.stream).await?;
+        packet.serialize(&mut self.stream)?;
 
         Ok(id)
     }
 
-    async fn receive_packet(&mut self) -> io::Result<Packet> {
-        Packet::deserialize(&mut self.stream).await
+    fn receive_packet(&mut self) -> io::Result<Packet> {
+        Packet::deserialize(&mut self.stream)
     }
 
     fn generate_packet_id(&mut self) -> i32 {
@@ -181,11 +182,11 @@ impl Builder {
         self
     }
 
-    pub async fn connect<A>(self, address: A, password: &str) -> Result<Connection>
+    pub fn connect<A>(self, address: A, password: &str) -> Result<Connection>
     where
         A: ToSocketAddrs
     {
-        let stream = TcpStream::connect(address).await?;
+        let stream = TcpStream::connect(address)?;
         let mut conn = Connection {
             stream,
             next_packet_id: INITIAL_PACKET_ID,
@@ -193,7 +194,7 @@ impl Builder {
             factorio_quirks_enabled: self.factorio_quirks_enabled,
         };
 
-        conn.auth(password).await?;
+        conn.auth(password)?;
 
         Ok(conn)
     }
